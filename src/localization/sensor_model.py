@@ -159,7 +159,7 @@ class SensorModel:
         scalled_observations = np.round(observation*((self.table_width-1)/z_max))
         probabilities = np.apply_along_axis(self.get_probabilities, 1, scalled_scans,scalled_observations)
         normalized_probabilities = np.apply_along_axis(self.normalize,0,probabilities)
-        return probabilities
+        return normalized_probabilities
         ####################################
 
     def normalize(self,s):
