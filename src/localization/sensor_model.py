@@ -157,7 +157,7 @@ class SensorModel:
         # This produces a matrix of size N x num_beams_per_particle 
         z_max = 200
         scans = self.scan_sim.scan(particles)
-<<<<<<< HEAD
+        
         scalled_scans = np.round(scans/self.resolution)
         scalled_observations = np.round(observation/self.resolution)
 
@@ -168,14 +168,6 @@ class SensorModel:
 
         probabilities = np.apply_along_axis(self.get_probabilities, 1, clipped_scans, clipped_observations)
         return np.power(probabilities,1.0/2.2)
-=======
-        scalled_scans = np.round(scans*((self.table_width-1)/z_max))
-        scalled_observations = np.round(observation*((self.table_width-1)/z_max))
-        probabilities = np.apply_along_axis(self.get_probabilities, 1, scalled_scans,scalled_observations)
-        normalized_probabilities = np.apply_along_axis(self.normalize,0,probabilities)
-        return normalized_probabilities
->>>>>>> 8e847addc2fa7dc17129997f0825db4764c2083a
-        ####################################
 
     def normalize(self,s):
         return s/sum(s)
