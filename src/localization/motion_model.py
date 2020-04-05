@@ -6,6 +6,7 @@ class MotionModel:
     def __init__(self):
 
         ####################################
+        # TODO
         # Do any precomputation for the motion
         # model here.
 

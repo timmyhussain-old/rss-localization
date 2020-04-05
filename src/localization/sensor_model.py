@@ -26,6 +26,8 @@ class SensorModel:
         self.sigma_hit = 8.0
         self.max_range = None
 
+        self.resolution = None
+        
         # Your sensor table will be a `table_width` x `table_width` np array:
         self.table_width = 201
         ####################################
@@ -153,13 +155,18 @@ class SensorModel:
         # You will probably want to use this function
         # to perform ray tracing from all the particles.
         # This produces a matrix of size N x num_beams_per_particle 
-        z_max = 30.0#*3779.5275590551#px (converting meters to pixels)
+        z_max = 200
         scans = self.scan_sim.scan(particles)
-        scalled_scans = np.round(scans*((self.table_width-1)/z_max))
-        scalled_observations = np.round(observation*((self.table_width-1)/z_max))
-        probabilities = np.apply_along_axis(self.get_probabilities, 1, scalled_scans,scalled_observations)
-        normalized_probabilities = np.apply_along_axis(self.normalize,0,probabilities)
-        return probabilities
+        scalled_scans = np.round(scans/self.resolution)
+        scalled_observations = np.round(observation/self.resolution)
+
+        clipped_scans = np.where(scalled_scans > z_max, z_max, scalled_scans)
+        clipped_observations = np.where(scalled_observations > z_max, z_max, scalled_observations)
+        clipped_scans = np.where(scalled_scans < 0, 0, scalled_scans)
+        clipped_observations = np.where(scalled_observations < 0, 0, scalled_observations)
+
+        probabilities = np.apply_along_axis(self.get_probabilities, 1, clipped_scans, clipped_observations)
+        return np.power(probabilities,1.0/2.2)
         ####################################
 
     def normalize(self,s):
@@ -173,9 +180,13 @@ class SensorModel:
     def look_up_table(self,location):
         z = int(location[0])
         z_s = int(location[1])
-        return self.sensor_model_table[z][z_s]
+        return self.sensor_model_table[z_s][z]
 
     def map_callback(self, map_msg):
+        # Set the resolution for the conversion:
+        self.resolution = map_msg.info.resolution
+
+
         # Convert the map to a numpy array
         self.map = np.array(map_msg.data, np.double)/100.
         self.map = np.clip(self.map, 0, 1)
