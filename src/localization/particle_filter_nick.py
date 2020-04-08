@@ -134,7 +134,6 @@ class ParticleFilter:
         self.viz_msg.header.frame_id = "/map"
         self.viz_msg.poses = [self.make_pose(x) for x in self.particles]
 
-
     def lidarCallback(self, msg):
 
         try:
@@ -142,17 +141,43 @@ class ParticleFilter:
             with self.lock:
                 self.probs = self.sensor_model.evaluate(self.particles, np.array(msg.ranges))
                 self.probs = self.sensor_model.normalize(self.probs)
-                #weighted average for the x and y
-                cumul_arr = np.cumsum(self.probs)
 
-                self.particles = np.array([self.motion_model.add_noise(self.particles[np.min(np.argwhere(cumul_arr > np.random.random_sample())), :], 0.1) for i in range(self.N)])
 
-                avg_dist = np.sum(self.probs * self.particles.T, axis=1)
+                #np.random.choice(5, 3, p=[0.1, 0, 0.3, 0.6, 0, probabilities of each particle])
+
+
+                particle_sampling = np.random.choice(self.N, self.N, p=self.probs) #Gets a list of indices of particles to add noise to.
+                #In extreme case if particle number 134 and 178 are really likely (say each almost 0.5) and all others are almost 0, will give something like:
+                #particle_sampling = [134 134 178 134 178 178 .... (200 long)]
+                #Also, not sure but self.probs might need to be converted into an np array to work?
+
+                #How much noise to add to the good points - might need trial and error, or maybe make proportional to probability if that doesn't work
+                #so lower probability particles get a bigger spread to look for other possible locations (e.g. xy_std_dev = 0.5 * max(self.probs) or something)
+                xy_std_dev = 0.1
+                theta_std_dev = 0.02
+
+                #Then make new particle list by taking the particle for each index in particle_sampling and adding noise
+                for i in range(self.N):
+                    #i'th particle x value = [relatively likely particle x value] + noise
+                    self.particles[i][0] = self.particles[particle_sampling[i]][0] + np.random.normal(0,xy_std_dev)
+
+                    #i'th particle y value = [relatively likely particle y value] + noise
+                    self.particles[i][1] = self.particles[particle_sampling[i]][1] + np.random.normal(0,xy_std_dev)
+
+                    #i'th particle theta value = [relatively likely particle theta value] + noise
+                    self.particles[i][2] = self.particles[particle_sampling[i]][2] + np.random.normal(0,theta_std_dev)
+
+                #non-weighted average for the x and y - since the particles have been resampled above, take normal (unweighted) average
+                #of all x and y locations
+
+                avg_dist = np.zeros(3)
+                avg_dist[0] = np.mean(self.particles[:, 0]) #Average x location
+                avg_dist[1] = np.mean(self.particles[:, 1]) #Average y location
+
                 #separate function for theta
                 avg_dist[2] = self.get_theta()
-
                 self.get_viz_msg()
-            # self.particles = np.array([self.motion_model.add_noise(avg_dist, 0.1) for i in range(self.N)])
+
 
             #populate odometry message with information
             self.odom_msg.pose.pose.position.x = avg_dist[0]
@@ -162,6 +187,7 @@ class ParticleFilter:
             self.odom_pub.publish(self.odom_msg)
 
             #publish points to topic so rviz can visualize
+
             self.viz_pub.publish(self.viz_msg)
 
             #broadcast transform from world to current location
