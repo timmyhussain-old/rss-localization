@@ -163,8 +163,8 @@ class SensorModel:
 
         clipped_scans = np.where(scalled_scans > z_max, z_max, scalled_scans)
         clipped_observations = np.where(scalled_observations > z_max, z_max, scalled_observations)
-        clipped_scans = np.where(scalled_scans < 0, 0, scalled_scans)
-        clipped_observations = np.where(scalled_observations < 0, 0, scalled_observations)
+        clipped_scans = np.where(clipped_scans < 0, 0, clipped_scans)
+        clipped_observations = np.where(clipped_observations < 0, 0, clipped_observations)
 
         probabilities = np.apply_along_axis(self.get_probabilities, 1, clipped_scans, clipped_observations)
         return np.power(probabilities,1.0/2.2)
