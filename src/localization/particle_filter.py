@@ -1,12 +1,18 @@
 #!/usr/bin/env python2
 
 import rospy
+import numpy as np
 from sensor_model import SensorModel
 from motion_model import MotionModel
+from tf.transformations import euler_from_quaternion
+from tf.transformations import quaternion_from_euler
+from tf import TransformBroadcaster
+
 
 from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import PoseWithCovarianceStamped
+from geometry_msgs.msg import PoseWithCovarianceStamped, Point
+from visualization_msgs.msg import Marker
 
 
 class ParticleFilter:
@@ -27,12 +33,15 @@ class ParticleFilter:
         #     information, and *not* use the pose component.
         scan_topic = rospy.get_param("~scan_topic", "/scan")
         odom_topic = rospy.get_param("~odom_topic", "/odom")
+
         self.laser_sub = rospy.Subscriber(scan_topic, LaserScan,
-                                          YOUR_LIDAR_CALLBACK, # TODO: Fill this in
+                                          self.lidarCallback, # TODO: Fill this in
                                           queue_size=1)
         self.odom_sub  = rospy.Subscriber(odom_topic, Odometry,
-                                          YOUR_ODOM_CALLBACK, # TODO: Fill this in
+                                          self.odomCallback, # TODO: Fill this in
                                           queue_size=1)
+        self.N = 200
+
 
         #  *Important Note #2:* You must respond to pose
         #     initialization requests sent to the /initialpose
@@ -40,7 +49,7 @@ class ParticleFilter:
         #     "Pose Estimate" feature in RViz, which publishes to
         #     /initialpose.
         self.pose_sub  = rospy.Subscriber("/initialpose", PoseWithCovarianceStamped,
-                                          YOUR_POSE_INITIALIZATION_CALLBACK, # TODO: Fill this in
+                                          self.initializationCallback, # TODO: Fill this in
                                           queue_size=1)
 
         #  *Important Note #3:* You must publish your pose estimate to
@@ -49,8 +58,15 @@ class ParticleFilter:
         #     provide the twist part of the Odometry message. The
         #     odometry you publish here should be with respect to the
         #     "/map" frame.
+
         self.odom_pub  = rospy.Publisher("/pf/pose/odom", Odometry, queue_size = 1)
-        
+        self.odom_msg = Odometry()
+
+        self.viz_pub = rospy.Publisher("viz_marker", Marker, queue_size = 10)
+        self.viz_msg = Marker()
+
+        self.br = TransformBroadcaster()
+
         # Initialize the models
         self.motion_model = MotionModel()
         self.sensor_model = SensorModel()
@@ -64,6 +80,91 @@ class ParticleFilter:
         #
         # Publish a transformation frame between the map
         # and the particle_filter_frame.
+
+    def initializationCallback(self, msg):
+        # return
+        #access the position and orientation data from the clicked point
+        particle_1 = [msg.pose.pose.position.x, msg.pose.pose.position.y, msg.pose.pose.orientation.w]
+        orientation = (msg.pose.pose.orientation.x, msg.pose.pose.orientation.y, msg.pose.pose.orientation.z, msg.pose.pose.orientation.w)
+        #get theta value from the orientation
+        particle_1[2] = euler_from_quaternion(orientation)[2]
+        #add noise using motion_model noise function
+        self.particles = np.array([self.motion_model.add_noise(particle_1, 0.1) for i in range(self.N)])
+        # rospy.loginfo(self.particles)
+
+
+    def odomCallback(self, msg):
+        try:
+            #updates particles according to motion model
+            self.particles = self.motion_model.evaluate(self.particles,
+                [msg.twist.twist.linear.x, msg.twist.twist.linear.y, msg.twist.twist.angular.z])
+            # rospy.loginfo(self.new_particles)
+        except AttributeError:
+            pass
+
+    def get_theta(self):
+        '''
+        input: none; directly access particle list
+        output: average angle using circular averaging
+        '''
+        return np.arctan2(np.mean(np.sin(self.particles[:, 2])), np.mean(np.cos(self.particles[:, 2])))
+
+    def make_pose(self, arr):
+        '''
+        input: [x, y, theta]
+        output: creates a geometry_msgs/Point object with x, y coords as arr and fixed z = 0'''
+        p = Point()
+        p.x = arr[0]
+        p.y = arr[1]
+        p.z = 0
+        return p
+
+    def get_viz_msg(self):
+        '''
+        input: none
+        output: none, directly modifies viz_msg attribute using particles list data
+        '''
+        self.viz_msg.header.stamp = rospy.Time()
+        self.viz_msg.header.frame_id = "map"
+        self.viz_msg.type = 8
+        self.viz_msg.action = 0
+        self.viz_msg.ns = "marker"
+        self.viz_msg.points = [self.make_pose(x) for x in self.particles]
+        self.viz_msg.color.g = 1.0
+        self.viz_msg.color.a = 1.0
+        self.viz_msg.scale.x = 10.0
+        self.viz_msg.scale.y = 10.0
+        self.viz_msg.scale.z = 10.0
+
+    def lidarCallback(self, msg):
+
+        try:
+            #probabilities
+            self.probs = self.sensor_model.evaluate(self.particles, np.array(msg.ranges))
+            self.probs = self.sensor_model.normalize(self.probs)
+            #weighted average for the x and y
+            avg_dist = np.sum(self.probs * self.particles.T, axis=1)
+            #separate function for theta
+            avg_dist[2] = self.get_theta()
+            self.particles = np.array([self.motion_model.add_noise(avg_dist, 0.1) for i in range(self.N)])
+
+            #populate odometry message with information
+            self.odom_msg.pose.pose.position.x = avg_dist[0]
+            self.odom_msg.pose.pose.position.y = avg_dist[1]
+            quaternion = quaternion_from_euler(0, 0, avg_dist[2])
+            self.odom_msg.pose.pose.orientation.x, self.odom_msg.pose.pose.orientation.y, self.odom_msg.pose.pose.orientation.z, self.odom_msg.pose.pose.orientation.w = quaternion
+            self.odom_pub.publish(self.odom_msg)
+
+            #publish points to topic so rviz can visualize
+            self.get_viz_msg()
+            self.viz_pub.publish(self.viz_msg)
+
+            #broadcast transform from world to current location
+            self.br.sendTransform((avg_dist[0], avg_dist[1], 0), quaternion,
+            rospy.Time.now(), self.particle_filter_frame, "map")
+
+        except AttributeError:
+            pass
 
 
 if __name__ == "__main__":
