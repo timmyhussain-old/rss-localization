@@ -155,6 +155,9 @@ class ParticleFilter:
             # self.particles = np.array([self.motion_model.add_noise(avg_dist, 0.1) for i in range(self.N)])
 
             #populate odometry message with information
+            self.odom_msg.header.stamp = rospy.get_rostime()
+            self.odom_msg.header.frame_id = "map"
+            self.odom_msg.child_frame_id = "base_link"
             self.odom_msg.pose.pose.position.x = avg_dist[0]
             self.odom_msg.pose.pose.position.y = avg_dist[1]
             quaternion = quaternion_from_euler(0, 0, avg_dist[2])
