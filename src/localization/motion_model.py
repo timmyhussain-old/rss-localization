@@ -11,7 +11,6 @@ class MotionModel:
         # model here.
 
         self.DETERMINISTIC = rospy.get_param('deterministic', True)
-
         ####################################
 
     def evaluate(self, particles, odometry):
@@ -44,26 +43,22 @@ class MotionModel:
         Computes the new pose of a particle given an odometry vector
         """
         if not self.DETERMINISTIC:
-            particle = self.add_noise(particle, 0.1)
-        rot = self.get_rotation_matrix(particle[2])
+            particle[0] = particle[0] + np.random.normal(0,abs(eta*particle[0]))
+            particle[1] = particle[1] + np.random.normal(0,abs(eta*particle[1]))
+            particle[2] = particle[2] + np.random.normal(0,abs(eta*particle[2]))
+        rot = np.array([[np.cos(particle[2]),-np.sin(particle[2])],[np.sin(particle[2]), np.cos(particle[2])]])
         relative_loc = np.array([[odometry[0]],[odometry[1]]])
         loc = np.dot(rot,relative_loc)
         new_loc = [loc[0][0]+particle[0], loc[1][0]+particle[1], particle[2]+odometry[2]]
         return new_loc
 
     
-    def add_noise(self, particle, eta):
-        """
-        Add some random noise with noise-factor eta to the particles
-        """
-        x = particle[0] + np.random.normal(0,abs(eta*particle[0]))
-        y = particle[1] + np.random.normal(0,abs(eta*particle[1]))
-        th = particle[2] + np.random.normal(0,abs(eta*particle[2]))
-        return [x,y,th]
-
-    def get_rotation_matrix(self,theta):
-        """
-        Returns a 2D Counter-clockwise rotation matirix for the angle theta
-        """
-        return np.array([[np.cos(theta),-np.sin(theta)],[np.sin(theta), np.cos(theta)]])
+#     def add_noise(self, particle, eta):
+#         """
+#         Add some random noise with noise-factor eta to the particles
+#         """
+#         x = particle[0] + np.random.normal(0,abs(eta*particle[0]))
+#         y = particle[1] + np.random.normal(0,abs(eta*particle[1]))
+#         th = particle[2] + np.random.normal(0,abs(eta*particle[2]))
+#         return [x,y,th]
 
