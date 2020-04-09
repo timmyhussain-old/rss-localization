@@ -43,14 +43,12 @@ class MotionModel:
         Computes the new pose of a particle given an odometry vector
         """
         if not self.DETERMINISTIC:
-            particle[0] = particle[0] + np.random.normal(0,abs(eta*particle[0]))
-            particle[1] = particle[1] + np.random.normal(0,abs(eta*particle[1]))
-            particle[2] = particle[2] + np.random.normal(0,abs(eta*particle[2]))
-        rot = np.array([[np.cos(particle[2]),-np.sin(particle[2])],[np.sin(particle[2]), np.cos(particle[2])]])
+            noise = np.array([np.random.normal(0,abs(eta*particle[0])), np.random.normal(0,abs(eta*particle[1])),np.random.normal(0,abs(eta*particle[2]))])
+            particle = particle + noise
+        rot_matrix = np.array([[np.cos(particle[2]),-np.sin(particle[2])],[np.sin(particle[2]), np.cos(particle[2])]])
         relative_loc = np.array([[odometry[0]],[odometry[1]]])
-        loc = np.dot(rot,relative_loc)
-        new_loc = [loc[0][0]+particle[0], loc[1][0]+particle[1], particle[2]+odometry[2]]
-        return new_loc
+        loc = np.dot(rot_matrix,relative_loc)
+        return np.array([loc[0][0]+particle[0], loc[1][0]+particle[1], particle[2]+odometry[2]])
 
     
 #     def add_noise(self, particle, eta):
