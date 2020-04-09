@@ -34,7 +34,13 @@ class ParticleFilter:
         #     information, and *not* use the pose component.
         scan_topic = rospy.get_param("~scan_topic", "/scan")
         odom_topic = rospy.get_param("~odom_topic", "/odom")
-        self.odom_rate = rospy.Rate(20)
+
+        self.particles = []
+        self.probs = []
+        self.time = rospy.get_time()
+
+        self.old_odom_msg = Odometry()
+        self.old_odom_msg.twist.twist.linear.x =self.old_odom_msg.twist.twist.linear.y = self.old_odom_msg.twist.twist.angular.z = 0
 
         self.laser_sub = rospy.Subscriber(scan_topic, LaserScan,
                                           self.lidarCallback, # TODO: Fill this in
@@ -42,7 +48,7 @@ class ParticleFilter:
         self.odom_sub  = rospy.Subscriber(odom_topic, Odometry,
                                           self.odomCallback, # TODO: Fill this in
                                           queue_size=1)
-        self.N = 200
+        self.N = rospy.get_param("~num_particles")
         self.lock = threading.RLock()
 
 
@@ -65,6 +71,9 @@ class ParticleFilter:
         self.odom_pub  = rospy.Publisher("/pf/pose/odom", Odometry, queue_size = 1)
         self.odom_msg = Odometry()
 
+        self.odom_msg.header.frame_id = "map"
+        self.odom_msg.child_frame_id = "base_link"
+
         self.viz_pub = rospy.Publisher("viz_marker", PoseArray, queue_size = 10)
         self.viz_msg = PoseArray()
 
@@ -73,6 +82,8 @@ class ParticleFilter:
         # Initialize the models
         self.motion_model = MotionModel()
         self.sensor_model = SensorModel()
+
+
 
 
         # Implement the MCL algorithm
@@ -99,15 +110,19 @@ class ParticleFilter:
 
 
     def odomCallback(self, msg):
-
-        try:
+        dpose = np.array([msg.twist.twist.linear.x,
+        msg.twist.twist.linear.y,
+        msg.twist.twist.angular.z]) \
+                - np.array([self.old_odom_msg.twist.twist.linear.x,
+                self.old_odom_msg.twist.twist.linear.y,
+                self.old_odom_msg.twist.twist.angular.z])
+        if len(self.particles) == 0:
+            return
             #updates particles according to motion model
-            with self.lock:
-                self.particles = self.motion_model.evaluate(self.particles,
-                    [msg.twist.twist.linear.x, msg.twist.twist.linear.y, msg.twist.twist.angular.z])
+        with self.lock:
+            self.particles = self.motion_model.evaluate(self.particles, dpose)
+            self.old_odom_msg = msg
             # rospy.loginfo(self.new_particles)
-        except AttributeError:
-            pass
         # finally:
             # self.odom_rate.sleep()
 
@@ -142,56 +157,60 @@ class ParticleFilter:
 
     def lidarCallback(self, msg):
         # rate = rospy.Rate(20)
-        try:
-            #probabilities
-            with self.lock:
-                # self.get_viz_msg()
-                # self.viz_pub.publish(self.viz_msg)
-                # return
-                self.probs = self.sensor_model.evaluate(self.particles,
-                    np.array(msg.ranges)[0:self.N*int(len(msg.ranges)/100):int(len(msg.ranges)/100.0)])
-                self.probs = self.sensor_model.normalize(self.probs)
-                #weighted average for the x and y
-                cumul_arr = np.cumsum(self.probs)
+        if len(self.particles) == 0:
+            return
 
-                self.particles = np.array([np.random.normal(self.particles[np.min(np.argwhere(cumul_arr > np.random.random_sample())), :], 0.2) for i in range(self.N)])
-                # self.particles = np.array([self.particles[np.min(np.argwhere(cumul_arr > np.random.random_sample())), :] for i in range(self.N)])
-                # res = np.random.choice(np.arange(self.N), self.N, replace = True, p = self.probs.tolist())
-                # self.particles = np.random.normal(self.particles[res], 0.1)
-                # self.particles = np.random.choice(self.particles, (self.N, 3), self.probs)
+        self.time = rospy.get_time()
+        with self.lock:
+            # self.get_viz_msg()
+            # self.viz_pub.publish(self.viz_msg)
+            # return
+            self.probs = self.sensor_model.evaluate(self.particles,
+                np.array(msg.ranges)[0:self.N*int(len(msg.ranges)/100.0):int(len(msg.ranges)/100.0)])
+            self.probs = self.sensor_model.normalize(self.probs)
+            #weighted average for the x and y
+            cumul_arr = np.cumsum(self.probs)
 
-                avg_dist = np.sum(self.probs * self.particles.T, axis=1)
-                #separate function for theta
-                avg_dist[2] = self.get_theta()
-                if self.viz_pub.get_num_connections() > 0:
-                    #publish points to topic so rviz can visualize
-                    self.get_viz_msg()
-                    self.viz_pub.publish(self.viz_msg)
+            self.particles = np.array([np.random.normal(self.particles[np.min(np.argwhere(cumul_arr > np.random.random_sample())), :], 0.2) for i in range(self.N)])
+            # self.particles = np.array([self.particles[np.min(np.argwhere(cumul_arr > np.random.random_sample())), :] for i in range(self.N)])
+            # res = np.random.choice(np.arange(self.N), self.N, replace = True, p = self.probs.tolist())
+            # self.particles = np.random.normal(self.particles[res], 0.1)
+            # self.particles = np.random.choice(self.particles, (self.N, 3), self.probs)
 
-            # self.particles = np.array([self.motion_model.add_noise(avg_dist, 0.1) for i in range(self.N)])
+            avg_dist = np.sum(self.probs * self.particles.T, axis=1)
+            #separate function for theta
+            avg_dist[2] = self.get_theta()
+            if self.viz_pub.get_num_connections() > 0:
+                #publish points to topic so rviz can visualize
+                self.get_viz_msg()
+                self.viz_pub.publish(self.viz_msg)
 
-            #populate odometry message with information
-            self.odom_msg.header.stamp = rospy.get_rostime()
-            self.odom_msg.header.frame_id = "map"
-            self.odom_msg.child_frame_id = "base_link"
-            self.odom_msg.pose.pose.position.x = avg_dist[0]
-            self.odom_msg.pose.pose.position.y = avg_dist[1]
-            quaternion = quaternion_from_euler(0, 0, avg_dist[2])
-            self.odom_msg.pose.pose.orientation.x, self.odom_msg.pose.pose.orientation.y, self.odom_msg.pose.pose.orientation.z, self.odom_msg.pose.pose.orientation.w = quaternion
-            self.odom_pub.publish(self.odom_msg)
+        # self.particles = np.array([self.motion_model.add_noise(avg_dist, 0.1) for i in range(self.N)])
+
+        #populate odometry message with information
+        self.odom_msg.header.stamp = rospy.get_rostime()
+        self.odom_msg.pose.pose.position.x = avg_dist[0]
+        self.odom_msg.pose.pose.position.y = avg_dist[1]
+        quaternion = quaternion_from_euler(0, 0, avg_dist[2])
+        self.odom_msg.pose.pose.orientation.x, self.odom_msg.pose.pose.orientation.y, self.odom_msg.pose.pose.orientation.z, self.odom_msg.pose.pose.orientation.w = quaternion
+        self.odom_pub.publish(self.odom_msg)
+
+        #broadcast transform from world to current location
+        self.br.sendTransform((avg_dist[0], avg_dist[1], 0), quaternion,
+        rospy.Time.now(), self.particle_filter_frame, "map")            # rate.sleep()
+
+    def run(self):
+        rate = rospy.Rate(30)
+        while not rospy.is_shutdown():
+            # self.publish()
+            rospy.spin()
+            rate.sleep()
 
 
-
-            #broadcast transform from world to current location
-            self.br.sendTransform((avg_dist[0], avg_dist[1], 0), quaternion,
-            rospy.Time.now(), self.particle_filter_frame, "map")
-            # rate.sleep()
-        except AttributeError:
-            pass
 
 
 if __name__ == "__main__":
     rospy.init_node("particle_filter")
     pf = ParticleFilter()
-    # pf.run()
-    rospy.spin()
+    pf.run()
+    # rospy.spin()
