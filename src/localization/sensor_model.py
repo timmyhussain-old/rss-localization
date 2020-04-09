@@ -80,10 +80,10 @@ class SensorModel:
 
         a_hit = 0.74
         hits = np.apply_along_axis(self.p_hit, 2, coords)
-        n_hits =  np.apply_along_axis(self.normalize, 0, hits)
+        n_hits =  hits/(np.sum(hits,0)) # np.apply_along_axis(self.normalize, 0, hits)
         every = np.apply_along_axis(self.p, 2, coords)
         combined = a_hit*n_hits + every
-        self.sensor_model_table = np.apply_along_axis(self.normalize, 0, combined)
+        self.sensor_model_table = combined/(np.sum(combined,0)) # np.apply_along_axis(self.normalize, 0, combined)
                                     
     
     def p_hit(self,u):
@@ -97,31 +97,45 @@ class SensorModel:
             return soln
         return 0.0
 
-    def p_short(self, z, z_s):
-        if z_s == 0.0:
-            return 0.0
-        front = 2.0/z_s
-        if 0.0 <= z and z <= z_s:
-            soln = front*(1.0-z/z_s)
-            return soln
-        return 0.0
+#     def p_short(self, z, z_s):
+#         if z_s == 0.0:
+#             return 0.0
+#         front = 2.0/z_s
+#         if 0.0 <= z and z <= z_s:
+#             soln = front*(1.0-z/z_s)
+#             return soln
+#         return 0.0
         
-    def p_max(self, z, z_max):
-        if z == z_max:
-            return 1.0
-        return 0.0
+#     def p_max(self, z, z_max):
+#         if z == z_max:
+#             return 1.0
+#         return 0.0
 
 
-    def p_rand(self, z, z_max):
-        if 0.0 <= z and z < z_max:
-            return 1.0/z_max
-        return 0.0
+#     def p_rand(self, z, z_max):
+#         if 0.0 <= z and z < z_max:
+#             return 1.0/z_max
+#         return 0.0
 
     def p(self,u):
         z_max = 200.0
         z = float(u[0])
-        z_s = float( u[1])
-        return self.alpha_short*self.p_short(z, z_s)+self.alpha_max*self.p_max(z, z_max)+self.alpha_rand*self.p_rand(z, z_max)
+        z_s = float(u[1])
+        
+        result = 0
+        # p_short
+        if z_s != 0.0:
+            if 0.0 <= z and z <= z_s:
+                result += self.alpha_short*(2.0/z_s)*(1.0-z/z_s)
+        # p_max
+        if z == z_max:
+            result += selt.alpha_max
+       
+        # p_rand
+        if 0.0 <= z and z < z_max:
+            result += self.alpha_rand 1.0/z_max        
+        
+        return result
 
 
     def evaluate(self, particles, observation):
@@ -169,8 +183,8 @@ class SensorModel:
         probabilities = np.apply_along_axis(self.get_probabilities, 1, clipped_scans, clipped_observations)
         return np.power(probabilities,1.0/2.2)
 
-    def normalize(self,s):
-        return s/sum(s)
+#     def normalize(self,s):
+#         return s/sum(s)
 
     def get_probabilities(self, reading, actual):
         combined = np.dstack((reading,actual))
