@@ -129,11 +129,11 @@ class SensorModel:
                 result += self.alpha_short*(2.0/z_s)*(1.0-z/z_s)
         # p_max
         if z == z_max:
-            result += selt.alpha_max
+            result += self.alpha_max
        
         # p_rand
         if 0.0 <= z and z < z_max:
-            result += self.alpha_rand 1.0/z_max        
+            result += self.alpha_rand*1.0/z_max        
         
         return result
 
