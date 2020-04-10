@@ -105,7 +105,7 @@ class ParticleFilter:
         particle_1[2] = euler_from_quaternion(orientation)[2]
         #add noise using motion_model noise function
         with self.lock:
-            self.particles = np.array([self.motion_model.add_noise(particle_1, 0.1) for i in range(self.N)])
+            self.particles = np.array([np.random.normal(particle_1, 0.1) for i in range(self.N)])
         # rospy.loginfo(self.particles)
 
 
@@ -167,7 +167,7 @@ class ParticleFilter:
             # return
             self.probs = self.sensor_model.evaluate(self.particles,
                 np.array(msg.ranges)[0:self.N*int(len(msg.ranges)/100.0):int(len(msg.ranges)/100.0)])
-            self.probs = self.sensor_model.normalize(self.probs)
+            self.probs = self.probs/sum(self.probs)
             #weighted average for the x and y
             cumul_arr = np.cumsum(self.probs)
 
