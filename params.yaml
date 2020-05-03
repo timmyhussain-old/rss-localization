@@ -1,5 +1,5 @@
 # A reasonable number to start with
-num_particles: 200
+num_particles: 400
 
 # The field of view centered around theta=0
 scan_field_of_view: 4.71 # radians
