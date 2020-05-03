@@ -44,11 +44,10 @@ class MotionModel:
         self.local_deltas[:,2] = odometry[2]
 
         particles[:,:] += self.local_deltas
-        add_rand = 0.05
         N = particles.shape[0]
-        particles[:,0] += np.random.normal(loc=0.0,scale=add_rand,size=N)
-        particles[:,1] += np.random.normal(loc=0.0,scale=add_rand*0.5,size=N)
-        particles[:,2] += np.random.normal(loc=0.0,scale=0.25,size=N)
+        particles[:,0] += np.random.normal(loc=0.0,scale=0.05,size=N)
+        particles[:,1] += np.random.normal(loc=0.0,scale=0.02,size=N)
+        particles[:,2] += np.random.normal(loc=0.0,scale=0.05,size=N)
 
         return particles
         ####################################
