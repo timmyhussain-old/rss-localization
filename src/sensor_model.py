@@ -23,7 +23,8 @@ class SensorModel:
         # Precompute the sensor model here
         # (You should probably write a
         #  function for this)
-        self.MAX_RANGE_PX = 200
+        self.MAX_RANGE_PX = 400
+        self.LIDAR_SCALE_TO_MAP_SCALE = rospy.get_param("~lidar_scale_to_map_scale", 1.0)
         self.sensor_model_table = None
         self.particle_scans = None
         self.precompute_sensor_model()
@@ -58,10 +59,10 @@ class SensorModel:
         print("Precomputing sensor model")
         # sensor model constants
         alpha_hit = 0.74
-        alpha_short = 0.07
+        alpha_short = 0.12
         alpha_max = 0.07
-        alpha_rand = 0.12
-        sigma_hit = 8.0 #convert to px space
+        alpha_rand = 0.07
+        sigma_hit = 6.0 #convert to px space
 
         table_width = int(self.MAX_RANGE_PX) + 1
         self.sensor_model_table = np.zeros((table_width,table_width))
@@ -139,11 +140,15 @@ class SensorModel:
         # to perform ray tracing from all the particles.
         # This produces a matrix of size N x num_beams_per_particle 
 
+        #stupid_particles = np.copy(particles)
+        #stupid_particles += [0, 0, np.pi]
         
         self.particle_scans = self.scan_sim.scan(particles)
 
-        observation /= float(self.map_info.resolution)
-        self.particle_scans /= float(self.map_info.resolution)
+        observation /= float(self.map_info.resolution)*self.LIDAR_SCALE_TO_MAP_SCALE
+        self.particle_scans /= float(self.map_info.resolution)*self.LIDAR_SCALE_TO_MAP_SCALE
+
+        #rospy.loginfo(np.mean(observation))
 
         observation[observation > self.MAX_RANGE_PX] = self.MAX_RANGE_PX
         self.particle_scans[self.particle_scans > self.MAX_RANGE_PX] = self.MAX_RANGE_PX
@@ -177,7 +182,7 @@ class SensorModel:
                 origin_o.z,
                 origin_o.w))
         origin = (origin_p.x, origin_p.y, origin_o[2])
-        print("map origin", origin)
+        print(("map origin", origin))
 
         # Initialize a map with the laser scan
         self.scan_sim.set_map(
