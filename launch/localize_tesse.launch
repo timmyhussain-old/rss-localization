@@ -1,6 +1,6 @@
 <launch>
-  <node pkg="localization-solution" type="particle_filter.py" name="particle_filter" output="screen">
-    <rosparam command="load" file="$(find localization-solution)/params.yaml"/>
+  <node pkg="localization" type="particle_filter.py" name="particle_filter" output="screen">
+    <rosparam command="load" file="$(find localization)/params.yaml"/>
     <param name="particle_filter_frame" value="/hood_lidar"/>
     <param name="map_topic" value="/map"/>
     <param name="lidar_scale_to_map_scale" value="5.0"/>
