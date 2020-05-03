@@ -1,13 +1,13 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 
 import numpy as np
 import time
-from threading import Lock
+from threading import RLock
 
 import rospy
 from sensor_msgs.msg import LaserScan
 from visualization_msgs.msg import Marker
-from geometry_msgs.msg import PoseStamped, PoseArray, Quaternion, PolygonStamped, PoseWithCovarianceStamped, PointStamped
+from geometry_msgs.msg import Pose, PoseStamped, PoseArray, Quaternion, PolygonStamped, PoseWithCovarianceStamped, PointStamped
 from nav_msgs.msg import Odometry, Path
 from nav_msgs.srv import GetMap
 import tf
@@ -38,10 +38,10 @@ class ParticleFilter:
         self.odom_initialized = False 
         self.map_initialized = False
         self.last_odom_pose = None # last received odom pose
-        self.last_stamp = None
+        self.last_odom_msg = None
         self.laser_angles = None
         self.downsampled_angles = None
-        self.state_lock = Lock()
+        self.state_lock = RLock()
 
         # paritcles
         self.inferred_pose = None
@@ -80,7 +80,7 @@ class ParticleFilter:
         self.pose_sub  = rospy.Subscriber("/initialpose", PoseWithCovarianceStamped, self.clicked_pose, queue_size=1)
         self.click_sub = rospy.Subscriber("/clicked_point", PointStamped, self.clicked_pose, queue_size=1)
 
-        print "Finished initializing, waiting on messages..."
+        print("Finished initializing, waiting on messages...")
 
     def initialize_global(self):
         '''
@@ -88,41 +88,39 @@ class ParticleFilter:
         '''
         print("GLOBAL INITIALIZATION")
         # randomize over grid coordinate space
-        self.state_lock.acquire()
+        with self.state_lock:
+            print('Waiting for map..')
+            while not self.sensor_model.map_set:
+                rospy.sleep(0.05)
 
-        print('Waiting for map..')
-        while not self.sensor_model.map_set:
-            continue    
+            self.map_initialized = True
+            self.permissible_region = self.sensor_model.permissible_region 
+            self.map = self.sensor_model.map
+            self.map_info = self.sensor_model.map_info
 
-        self.map_initialized = True
-        self.permissible_region = self.sensor_model.permissible_region 
-        self.map = self.sensor_model.map
-        self.map_info = self.sensor_model.map_info
+            permissible_x, permissible_y = np.where(self.permissible_region == 1)
+            indices = np.random.randint(0, len(permissible_x), size=self.MAX_PARTICLES)
 
-        permissible_x, permissible_y = np.where(self.permissible_region == 1)
-        indices = np.random.randint(0, len(permissible_x), size=self.MAX_PARTICLES)
+            permissible_states = np.zeros((self.MAX_PARTICLES,3))
+            permissible_states[:,0] = permissible_y[indices]
+            permissible_states[:,1] = permissible_x[indices]
+            permissible_states[:,2] = np.random.random(self.MAX_PARTICLES) * np.pi * 2.0
 
-        permissible_states = np.zeros((self.MAX_PARTICLES,3))
-        permissible_states[:,0] = permissible_y[indices]
-        permissible_states[:,1] = permissible_x[indices]
-        permissible_states[:,2] = np.random.random(self.MAX_PARTICLES) * np.pi * 2.0
-
-        Utils.map_to_world(permissible_states, self.map_info)
-        self.particles = permissible_states
-        self.weights[:] = 1.0 / self.MAX_PARTICLES
-        self.state_lock.release()
+            Utils.map_to_world(permissible_states, self.map_info)
+            self.particles = permissible_states
+            self.weights[:] = 1.0 / self.MAX_PARTICLES
 
     def initialize_particles_pose(self, pose):
         '''
         Initialize particles in the general region of the provided pose.
         '''
-        print "SETTING POSE"
-        print pose
-        self.state_lock.acquire()
-        self.weights = np.ones(self.MAX_PARTICLES) / float(self.MAX_PARTICLES)
-        self.particles[:,0] = pose.position.x + np.random.normal(loc=0.0,scale=0.5,size=self.MAX_PARTICLES)
-        self.particles[:,1] = pose.position.y + np.random.normal(loc=0.0,scale=0.5,size=self.MAX_PARTICLES)
-        self.particles[:,2] = Utils.quaternion_to_angle(pose.orientation) + np.random.normal(loc=0.0,scale=0.4,size=self.MAX_PARTICLES)
+        print("SETTING POSE")
+        print(pose)
+        with self.state_lock:
+            self.weights = np.ones(self.MAX_PARTICLES) / float(self.MAX_PARTICLES)
+            self.particles[:,0] = pose.position.x + np.random.normal(loc=0.0,scale=0.5,size=self.MAX_PARTICLES)
+            self.particles[:,1] = pose.position.y + np.random.normal(loc=0.0,scale=0.5,size=self.MAX_PARTICLES)
+            self.particles[:,2] = Utils.quaternion_to_angle(pose.orientation) + np.random.normal(loc=0.0,scale=0.4,size=self.MAX_PARTICLES)
 	
 	# This is supposed to be used only when in simulation env (due to simulation bugs)
 	# if isinstance(self.last_odom_pose, np.ndarray):
@@ -130,7 +128,7 @@ class ParticleFilter:
         #     self.last_odom_pose[1] = pose.position.y
         #     self.last_odom_pose[2] = Utils.quaternion_to_angle(pose.orientation)
 	
-        self.state_lock.release()
+        
 
     def clicked_pose(self, msg):
         '''
@@ -151,7 +149,7 @@ class ParticleFilter:
 
         # this may cause issues with the TF tree. If so, see the below code.
         self.pub_tf.sendTransform((pose[0],pose[1],0),tf.transformations.quaternion_from_euler(0, 0, pose[2]), 
-               stamp , "/laser", "/map")
+               stamp , self.particle_filter_frame, "/map")
 
         # also publish odometry to facilitate getting the localization pose
         if self.PUBLISH_ODOM:
@@ -180,7 +178,7 @@ class ParticleFilter:
         map_laser_pos -= np.dot(tf.transformations.quaternion_matrix(tf.transformations.unit_vector(map_laser_rotation))[:3,:3], laser_base_link_offset).T
 
         # Publish transform
-        self.pub_tf.sendTransform(map_laser_pos, map_laser_rotation, stamp , self.particle_filter_frame, "/map")
+        #self.pub_tf.sendTransform(map_laser_pos, map_laser_rotation, stamp , self.particle_filter_frame, "/map")
 
     def publish_particles(self, particles):
         pa = PoseArray()
@@ -190,9 +188,9 @@ class ParticleFilter:
 
     def publish_scan(self, angles, ranges):
         ls = LaserScan()
-        ls.header = Utils.make_header("laser", stamp=self.last_stamp)
-        ls.angle_min = np.min(angles)
-        ls.angle_max = np.max(angles)
+        ls.header = Utils.make_header(self.particle_filter_frame, stamp=self.last_stamp)
+        ls.angle_min = np.min(angles)#+np.pi
+        ls.angle_max = np.max(angles)#+np.pi
         ls.angle_increment = np.abs(angles[0] - angles[1])
         ls.range_min = 0
         ls.range_max = np.max(ranges)
@@ -237,7 +235,7 @@ class ParticleFilter:
         Initializes reused buffers, and stores the relevant laser scanner data for later use.
         '''
         if not isinstance(self.laser_angles, np.ndarray):
-            print "...Received first LiDAR message"
+            print("...Received first LiDAR message")
             self.laser_angles = np.linspace(msg.angle_min, msg.angle_max, len(msg.ranges))
             self.downsampled_angles = np.copy(self.laser_angles[0::self.ANGLE_STEP]).astype(np.float32)
             #self.viz_queries = np.zeros((self.downsampled_angles.shape[0],3), dtype=np.float32)
@@ -251,29 +249,25 @@ class ParticleFilter:
         Store deltas between consecutive odometry messages in the coordinate space of the car.
         Odometry data is accumulated via dead reckoning, so it is very inaccurate on its own.
         '''
-        position = np.array([
-            msg.pose.pose.position.x,
-            msg.pose.pose.position.y])
-        orientation = Utils.quaternion_to_angle(msg.pose.pose.orientation)
-        pose = np.array([position[0], position[1], orientation])
-
-        if isinstance(self.last_odom_pose, np.ndarray):
-            rot = Utils.rotation_matrix(-self.last_odom_pose[2])
-            delta = np.array([position - self.last_odom_pose[0:2]]).transpose()
-            local_delta = (rot*delta).transpose()
-
-            # changes in x,y,theta in local coordinate system of the car
-            self.odometry_data = np.array([local_delta[0,0], local_delta[0,1], orientation - self.last_odom_pose[2]])
-            self.last_odom_pose = pose
+        if self.last_odom_msg:
+            last_time = self.last_odom_msg.header.stamp.to_sec()
+            this_time = msg.header.stamp.to_sec()
+            dt = this_time - last_time
+            self.odometry_data = np.array([msg.twist.twist.linear.x, 
+                                           msg.twist.twist.linear.y, 
+                                           msg.twist.twist.angular.z])*dt
+            #rospy.loginfo(dt)
+            self.last_odom_msg = msg
             self.last_stamp = msg.header.stamp
-            self.odom_initialized = True
+            #rospy.loginfo("update")
+            self.update()
         else:
-            print "...Received first Odometry message"
-            self.last_odom_pose = pose
+            print("...Received first Odometry message")
+            self.last_odom_msg = msg
+            self.last_stamp = msg.header.stamp
+            self.odom_initialized = True 
 
-        # this topic is slower than lidar, so update every time we receive a message
-        self.update()
-    
+
     def expected_pose(self, particles):
         # returns the expected value of the pose given the particle distribution
         return np.dot(particles.transpose(), self.weights)
@@ -285,6 +279,9 @@ class ParticleFilter:
         # Make sure you include some way to initialize
         # your particles, ideally with some sort
         # of interactive interface in rviz
+        if np.isnan(self.weights).any():            
+            return False
+        
         proposal_indices = np.random.choice(self.particle_indices, self.MAX_PARTICLES, p=self.weights)
         proposal_distribution = self.particles[proposal_indices,:]
         if self.SHOW_FINE_TIMING:
@@ -311,8 +308,8 @@ class ParticleFilter:
             t_total = (t_norm - t)/100.0
 
         if self.SHOW_FINE_TIMING and self.iters % 10 == 0:
-            print "MCL: propose: ", np.round((t_propose-t)/t_total, 2), "motion:", np.round((t_motion-t_propose)/t_total, 2), \
-                  "sensor:", np.round((t_sensor-t_motion)/t_total, 2), "norm:", np.round((t_norm-t_sensor)/t_total, 2)
+            print("MCL: propose: ", np.round((t_propose-t)/t_total, 2), "motion:", np.round((t_motion-t_propose)/t_total, 2), \
+                  "sensor:", np.round((t_sensor-t_motion)/t_total, 2), "norm:", np.round((t_norm-t_sensor)/t_total, 2))
 
         # save the particles
         self.particles = proposal_distribution 
@@ -321,6 +318,7 @@ class ParticleFilter:
 
         # Publish a transformation frame between the map
         # and the particle_filter_frame.
+        return True
 
 
     def update(self):
@@ -329,36 +327,48 @@ class ParticleFilter:
         Ensures the state is correctly initialized, and acquires the state lock before proceeding.
         '''
         if self.lidar_initialized and self.odom_initialized and self.map_initialized:
-            if self.state_lock.locked():
-                print("Concurrency error avoided")
-            else:
-                self.state_lock.acquire()
-                self.timer.tick()
-                self.iters += 1
-
-                t1 = time.time()
+            self.timer.tick()
+            self.iters += 1
+            t1 = time.time()
+                
+            with self.state_lock:
                 scans = np.copy(self.downsampled_ranges).astype(np.float32)
                 odom = np.copy(self.odometry_data)
                 self.odometry_data = np.zeros(3)
-
+                
                 # run the MCL update algorithm
-                self.MCL(odom, scans)
+                if not self.MCL(odom, scans):
+                    rospy.logwarn("skipped update")
+                    return
 
+                if np.isnan(self.weights).any():
+                    rospy.logwarn("something weird happened to the particle distribution")
+                    ps = Pose()
+                    ps.position.x = self.inferred_pose[0]
+                    ps.position.y = self.inferred_pose[1]
+                    ps.orientation = Utils.angle_to_quaternion(self.inferred_pose[2])
+                    self.initialize_particles_pose(ps)
+                    return
+                
                 # compute the expected value of the robot pose
                 self.inferred_pose = self.expected_pose(self.particles)
-                self.state_lock.release()
-                t2 = time.time()
+                #rospy.loginfo(self.inferred_pose)
 
-                # publish transformation frame based on inferred pose
-                self.publish_tf(self.inferred_pose, self.last_stamp)
+            t2 = time.time()
 
-                # this is for tracking particle filter speed
-                ips = 1.0 / (t2 - t1)
-                self.smoothing.append(ips)
-                #if self.iters % 10 == 0:
-                    #print "iters per sec:", int(self.timer.fps()), " possible:", int(self.smoothing.mean())
+            # publish transformation frame based on inferred pose
+            #rospy.loginfo("update")
+            self.publish_tf(self.inferred_pose, self.last_stamp)
+            
+            # this is for tracking particle filter speed
+            ips = 1.0 / (t2 - t1)
+            self.smoothing.append(ips)
+            #if self.iters % 10 == 0:
+            #    print "iters per sec:", int(self.timer.fps()), " possible:", int(self.smoothing.mean())
 
-                self.visualize()
+            self.visualize()
+
+
 if __name__ == "__main__":
     rospy.init_node("particle_filter")
     pf = ParticleFilter()
