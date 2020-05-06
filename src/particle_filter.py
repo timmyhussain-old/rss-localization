@@ -102,13 +102,25 @@ class ParticleFilter:
             indices = np.random.randint(0, len(permissible_x), size=self.MAX_PARTICLES)
 
             permissible_states = np.zeros((self.MAX_PARTICLES,3))
+            pose = Pose()
+            pose.orientation.x = 0.0
+            pose.orientation.y = 0.0
+            pose.orientation.z = 0.823
+            pose.orientation.w = 0.568
+            pose.position.x = 4.96825
+            pose.position.y = -22.3357
             permissible_states[:,0] = permissible_y[indices]
             permissible_states[:,1] = permissible_x[indices]
             permissible_states[:,2] = np.random.random(self.MAX_PARTICLES) * np.pi * 2.0
 
             Utils.map_to_world(permissible_states, self.map_info)
+            #self.particles[:,0] = pose.position.x + np.random.normal(loc=0.0,scale=0.5,size=self.MAX_PARTICLES)
+            #self.particles[:,1] = pose.position.y + np.random.normal(loc=0.0,scale=0.5,size=self.MAX_PARTICLES)
+            #self.particles[:,2] = Utils.quaternion_to_angle(pose.orientation) + np.random.normal(loc=0.0,scale=0.4,size=self.MAX_PARTICLES)
             self.particles = permissible_states
             self.weights[:] = 1.0 / self.MAX_PARTICLES
+
+            self.initialize_particles_pose(pose)
 
     def initialize_particles_pose(self, pose):
         '''
@@ -139,6 +151,13 @@ class ParticleFilter:
             #self.initialize_particles_pose(msg.pose.pose)
             self.initialize_global()
         elif isinstance(msg, PoseWithCovarianceStamped):
+            #msg.pose.pose.position.x = 4.96825
+            #msg.pose.pose.position.y = -22.3356895
+            #msg.pose.pose.position.z = 0.0
+            #msg.pose.pose.orientation.x = 0.0
+            #msg.pose.pose.orientation.y = 0.0
+            #msg.pose.pose.orientation.z = 0.823028815
+            #msg.pose.pose.orientation.w = 0.5679996
             self.initialize_particles_pose(msg.pose.pose)
 
 
@@ -148,8 +167,11 @@ class ParticleFilter:
             stamp = rospy.Time.now()
 
         # this may cause issues with the TF tree. If so, see the below code.
+        #self.pub_tf.sendTransform((pose[0],pose[1],0),tf.transformations.quaternion_from_euler(0, 0, pose[2]), 
+               #stamp , self.particle_filter_frame, "/map")
+
         self.pub_tf.sendTransform((pose[0],pose[1],0),tf.transformations.quaternion_from_euler(0, 0, pose[2]), 
-               stamp , self.particle_filter_frame, "/map")
+               stamp ,"/hood_lidar", "/map")
 
         # also publish odometry to facilitate getting the localization pose
         if self.PUBLISH_ODOM:
@@ -179,6 +201,7 @@ class ParticleFilter:
 
         # Publish transform
         #self.pub_tf.sendTransform(map_laser_pos, map_laser_rotation, stamp , self.particle_filter_frame, "/map")
+        self.pub_tf.sendTransform(map_laser_pos, map_laser_rotation, stamp , "/base_link", "/map")
 
     def publish_particles(self, particles):
         pa = PoseArray()
