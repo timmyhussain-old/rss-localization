@@ -120,7 +120,7 @@ class ParticleFilter:
             self.particles = permissible_states
             self.weights[:] = 1.0 / self.MAX_PARTICLES
 
-            self.initialize_particles_pose(pose)
+            #self.initialize_particles_pose(pose)
 
     def initialize_particles_pose(self, pose):
         '''
